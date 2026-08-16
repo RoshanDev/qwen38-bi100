@@ -520,8 +520,8 @@ class Settings:
             timeout_seconds=int(os.environ.get("QWEN_UPSTREAM_TIMEOUT_SECONDS", "3600")),
             use_system_proxy=os.environ.get("QWEN_UPSTREAM_USE_SYSTEM_PROXY", "0").lower()
             in {"1", "true", "yes", "on"},
-            max_context_tokens=int(os.environ.get("QWEN_MAX_CONTEXT_TOKENS", "100000")),
-            max_input_tokens=int(os.environ.get("QWEN_MAX_INPUT_TOKENS", "94000")),
+            max_context_tokens=int(os.environ.get("QWEN_MAX_CONTEXT_TOKENS", "400000")),
+            max_input_tokens=int(os.environ.get("QWEN_MAX_INPUT_TOKENS", "390000")),
             max_tool_output_chars=int(
                 os.environ.get("QWEN_MAX_TOOL_OUTPUT_CHARS", "16000")
             ),
@@ -529,11 +529,11 @@ class Settings:
                 os.environ.get("QWEN_MAX_TOOL_CALLS_PER_TURN", "32")
             ),
             max_output_tokens=int(
-                os.environ.get("QWEN_MAX_OUTPUT_TOKENS", "4096")
+                os.environ.get("QWEN_MAX_OUTPUT_TOKENS", "8192")
             ),
             token_safety_margin=int(os.environ.get("QWEN_TOKEN_SAFETY_MARGIN", "256")),
             fallback_max_output_tokens=int(
-                os.environ.get("QWEN_FALLBACK_MAX_OUTPUT_TOKENS", "4096")
+                os.environ.get("QWEN_FALLBACK_MAX_OUTPUT_TOKENS", "8192")
             ),
             compact_codex_prompt=os.environ.get(
                 "QWEN_COMPACT_CODEX_INSTRUCTIONS", "0"

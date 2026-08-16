@@ -105,22 +105,22 @@ codex-qwen38
 codex
 ```
 
-## 100K 上下文预算
+## 400K 上下文预算
 
 Codex 的系统提示、工具 schema 和项目说明在本机首轮约占 8K tokens，因此 8K 服务没有实际交互余量。当前配置为：
 
-- Codex `model_context_window=100000`；
-- 90,000 tokens 触发 Codex 历史压缩；
-- bridge 输入安全线为 94,000 tokens；
-- 单次输出上限 4,096 tokens，安全 margin 256；
+- Codex `model_context_window=400000`；
+- 360,000 tokens 触发 Codex 历史压缩；
+- bridge 输入安全线为 390,000 tokens；
+- 单次输出上限 8192 tokens，安全 margin 256；
 - 单条工具输出最多保留 16,000 字符，单 turn 最多 32 次工具调用；
 - 不再压缩 Codex 内建系统提示；
 - 调用上游 `/tokenize` 计算真实输入大小，并动态缩小输出预算；
 - 超过安全线时先截短旧工具输出，再由 Codex 自动压缩历史。
 
-本次普通回复和工具闭环分别实际使用 8,319 与 16,787 tokens，均通过。`Model metadata ... not found` 表示 Codex 没有内置此自定义模型的产品元数据；skills 描述缩短警告表示所有 skill 仍可见但描述更短。两者不影响已设置的 100K context；真正失败会显示 HTTP 状态或 `ERROR`。
+切到 400K 后，普通回复和工具闭环分别实际使用 11,321 与 22,794 tokens，均通过；工具测试真实执行了 `printf CODEX_400K_TOOL_OK`。`Model metadata ... not found` 表示 Codex 没有内置此自定义模型的产品元数据；skills 描述缩短警告表示所有 skill 仍可见但描述更短。两者不影响显式设置的 400K context；真正失败会显示 HTTP 状态或 `ERROR`。
 
-模型服务最高已用 95,963 prompt tokens 做双位置口令检索。完整记录见 [长上下文适配与实测](LONG_CONTEXT.md)。
+模型服务最高已用 398,971 prompt tokens 做双位置口令检索。该请求耗时约 44 分 35 秒，因此 360K 自动压缩是容量保护，不代表达到 360K 后仍有交互级首 token 延迟。完整记录见 [长上下文适配与实测](LONG_CONTEXT.md)。
 
 ## 明确指定隔离配置
 

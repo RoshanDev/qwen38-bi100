@@ -14,5 +14,4 @@
 
 Qwen3.8-27B 官方权重使用 Apache-2.0；本次没有修改任何 tensor，只把 `architectures` 切换为文本 adapter，并可选生成一个 YaRN `config.json` overlay。重新上传约56GB相同权重没有技术收益，也容易让用户误以为这是新的训练/量化版本，因此本次不创建重复模型仓库。
 
-需要 1M 配置时，使用 [prepare_yarn_model.py](../scripts/prepare_yarn_model.py) 从官方固定 revision 本地生成即可。若将来确需发布衍生模型，应保留 Apache-2.0 LICENSE/NOTICE、清楚标注修改，并先解决推理 adapter/CoreX 运行时的独立分发许可。
-
+需要400K或1M配置时，使用 [prepare_yarn_model.py](../scripts/prepare_yarn_model.py) 从官方固定 revision 本地生成即可。脚本会同时补上 vLLM 0.6.3 所需的16层KV布局兼容字段。若将来确需发布衍生模型，应保留 Apache-2.0 LICENSE/NOTICE、清楚标注修改，并先解决推理 adapter/CoreX 运行时的独立分发许可。

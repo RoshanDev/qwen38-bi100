@@ -11,7 +11,7 @@
 - 可直接 `docker load` 的派生镜像归档；
 - `docker inspect`、镜像 inspect、GPU/OS/Docker 版本；
 - WSL 隔离的 Codex `config.toml`、`bridge.env`、user systemd unit 和本仓库；
-- YaRN overlay 的独立配置与生成脚本。
+- 400K/1M YaRN overlay 的独立配置、KV层布局修复与生成脚本。
 
 不要把 Codex history、SQLite、installation ID 或官方 `~/.codex` 登录状态放进共享备份。
 
@@ -43,23 +43,29 @@ sha256sum \
 
 ```bash
 ssh root@QWEN_HOST \
-  'docker save qwen38-bi100:corex3.2.3-longctx-d972 | gzip -1' \
+  'docker save qwen38-bi100:corex3.2.3-dense-native-v1 | gzip -1' \
 | ssh BACKUP_USER@BACKUP_HOST \
-  'cat > /home/BACKUP_USER/backup/qwen38-bi100-DATE/images/qwen38-longctx.tar.gz'
+  'cat > /home/BACKUP_USER/backup/qwen38-bi100-DATE/images/qwen38-dense-native-v1.tar.gz'
 ```
 
 目标端必须执行：
 
 ```bash
-gzip -t qwen38-longctx.tar.gz
-sha256sum qwen38-longctx.tar.gz > qwen38-longctx.tar.gz.sha256
+gzip -t qwen38-dense-native-v1.tar.gz
+sha256sum qwen38-dense-native-v1.tar.gz > qwen38-dense-native-v1.tar.gz.sha256
 ```
+
+本次实测的 `corex3.2.3-dense-native-v1` 归档大小为
+`10,343,137,293` bytes，SHA-256 为
+`cb55b3e861e99f16ea121813cb0c2653fc1c23baf50e0e112e1d72fffad6e41a`；
+源端和备份端均通过 `gzip -t`。镜像包含未明确授权公开再分发的 CoreX 基础层，
+因此该校验值只用于内部灾备，不表示镜像已发布到 Docker Hub。
 
 恢复：
 
 ```bash
-sha256sum -c qwen38-longctx.tar.gz.sha256
-gzip -dc qwen38-longctx.tar.gz | docker load
+sha256sum -c qwen38-dense-native-v1.tar.gz.sha256
+gzip -dc qwen38-dense-native-v1.tar.gz | docker load
 ```
 
 ## WSL Codex 配置
@@ -81,4 +87,3 @@ systemctl --user daemon-reload
 systemctl --user enable --now qwen38-codex-bridge.service
 curl --noproxy '*' -fsS http://127.0.0.1:8348/healthz
 ```
-

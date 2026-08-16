@@ -1,0 +1,16 @@
+ARG BASE_IMAGE=qwen38-bi100:corex3.2.3-longctx-d972
+FROM ${BASE_IMAGE}
+
+LABEL org.opencontainers.image.title="Qwen3.8-27B dense native experiments on Iluvatar BI-V100"
+LABEL org.opencontainers.image.description="Independently gated LOOP1, chunk recurrence, and RMSNorm fast paths"
+
+COPY scripts/patch_dense_native.py /tmp/patch_dense_native.py
+RUN python3 /tmp/patch_dense_native.py \
+      /usr/local/corex/lib/python3/dist-packages/vllm/model_executor/models/qwen3_5.py \
+    && mkdir -p /opt/sw_home/local/cuda/lib64 \
+    && ln -sfn /usr/local/corex/lib64/libcusolver.so \
+      /opt/sw_home/local/cuda/lib64/libcusolver.so \
+    && test -e /opt/sw_home/local/cuda/lib64/libcusolver.so \
+    && python3 -m py_compile \
+      /usr/local/corex/lib/python3/dist-packages/vllm/model_executor/models/qwen3_5.py \
+    && rm -f /tmp/patch_dense_native.py

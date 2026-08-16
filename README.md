@@ -4,16 +4,16 @@
 
 ## 已验证状态
 
-2026-08-16 已在一台 8×BI-V100 32GB 服务器上实测部署成功。8K 回滚服务与 100K 长上下文服务当前同时运行。
+2026-08-16 已在一台 8×BI-V100 32GB 服务器上实测部署成功。8K 回滚服务与 400K 长上下文服务当前同时运行。
 
-| 项目 | 8K 回滚服务 | 100K 主服务 |
+| 项目 | 8K 回滚服务 | 400K 主服务 |
 |---|---|---|
 | API | `http://QWEN_HOST:1111/v1` | `http://QWEN_HOST:1112/v1` |
-| 容器 | `qwen38-bi100-server` | `qwen38-bi100-longctx` |
-| 镜像 | `qwen38-bi100:corex3.2.3-text-0e899` | `qwen38-bi100:corex3.2.3-longctx-d972` |
+| 容器 | `qwen38-bi100-server` | `qwen38-bi100-400k` |
+| 镜像 | `qwen38-bi100:corex3.2.3-text-0e899` | `qwen38-bi100:corex3.2.3-dense-native-v1` |
 | GPU | 0–3，TP=4 | 4–7，TP=4 |
-| 上下文 | 8192 | 100000 |
-| 关键参数 | eager、显存利用率 0.80 | eager、chunked prefill=4096、显存利用率 0.95 |
+| 上下文 | 8192 | 400000，YaRN factor=2 |
+| 关键参数 | eager、显存利用率 0.80 | eager、chunked prefill=4096、CHUNK fastpath、显存利用率 0.95 |
 
 模型固定在官方 revision `1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0`。18 个权重分片、1199 个索引键和总字节均已离线校验。
 
@@ -25,8 +25,12 @@
 | 31,965 | 57.354s | 通过 |
 | 63,953 | 142.991s | 通过 |
 | 95,963 | 255.270s | 通过 |
+| 271,965 | 1,350.743s | 通过 |
+| 398,971 | 2,675.417s | 通过 |
 
-因此 Codex 使用 100K context、94K bridge 输入安全线和 90K 自动压缩阈值，给输出与协议保留余量。
+因此 Codex 使用 400K context、390K bridge 输入安全线和 360K 自动压缩阈值，最多为输出保留 8192 tokens。398,971-token 冷请求需约 44 分 35 秒，400K 表示容量与正确性，不表示可交互的冷启动延迟。
+
+1M/factor4 服务也已实机启动：65,485 GPU blocks、1,047,760-token KV 容量、1M 请求并发 1.05x，并通过 16K 正确性回归。但未执行接近 1M 的完整提示，因此不把它写成“1M 全长已验证”。
 
 ## 调用示例
 
@@ -57,8 +61,8 @@ curl --noproxy '*' -sS \
 ssh root@QWEN_HOST
 docker ps --filter name=qwen38-bi100-server
 docker logs -f --tail=200 qwen38-bi100-server
-docker ps --filter name=qwen38-bi100-longctx
-docker logs -f --tail=200 qwen38-bi100-longctx
+docker ps --filter name=qwen38-bi100-400k
+docker logs -f --tail=200 qwen38-bi100-400k
 ```
 
 停止和重新启动现有容器：
@@ -74,7 +78,7 @@ docker start qwen38-bi100-server
 bash /data/qwen38/scripts/start_server.sh
 ```
 
-重建 100K 服务：
+重建 400K 服务：
 
 ```bash
 bash /data/qwen38/deployment/qwen38-bi100/scripts/start_long_context_server.sh
@@ -87,7 +91,7 @@ python3 /data/qwen38/scripts/smoke_api.py --wait-seconds 60
 python3 /data/qwen38/scripts/benchmark_api.py --max-tokens 512
 python3 /data/qwen38/deployment/qwen38-bi100/scripts/test_long_context.py \
   --base-url http://127.0.0.1:1112 \
-  --target-input-tokens 96000
+  --target-input-tokens 272000
 ```
 
 ## 校验与复现
@@ -139,14 +143,33 @@ QWEN38_BASE_IMAGE='qwen38-bi100:corex3.2.3-text-0e899' \
 bash scripts/build_long_context_image.sh
 ```
 
+再构建默认关闭、可独立 A/B 的 dense native fastpath 镜像：
+
+```bash
+BASE_IMAGE='qwen38-bi100:corex3.2.3-longctx-d972' \
+bash scripts/build_dense_native_image.sh
+```
+
+400K overlay 使用硬链接复用官方权重，不重复占用约56GB：
+
+```bash
+python3 scripts/prepare_yarn_model.py \
+  /data/qwen38/models/Qwen3.8-27B \
+  /data/qwen38/models/Qwen3.8-27B-YaRN-400K-kvfix \
+  --factor 2.0 \
+  --target-context 400000
+```
+
 详细原理、1M 探针与验收步骤见 [长上下文适配与实测](docs/LONG_CONTEXT.md)。
 
 ## 已知边界
 
 - 当前适配仅验证文本推理，不支持图片输入。
 - 未启用 MTP 推测解码、FP8 或 CUDA graph。
-- 100K 服务启用了社区 dense chunked-prefill/paged-attention 路径；当前最高真实检索为 95,963 prompt tokens。
-- Qwen3.8 官方支持 262,144 原生上下文并可用 YaRN 扩至 1M，但当前 TP4/CoreX 实机只能分配 261,936 tokens 的 KV cache，1M 启动探针被 vLLM 正确拒绝，不能通过客户端虚报为 1M。
+- 400K 服务启用了社区 dense chunked-prefill/paged-attention 路径和本项目 CHUNK recurrence fastpath；当前最高真实检索为 398,971 prompt tokens。
+- 旧 vLLM 将 64 层混合模型误算成 64 个 KV 层，导致旧探针只有 261,936-token 容量。本项目给 overlay 写入顶层 `layers_block_type` 后，vLLM 正确识别 16 个 full-attention 层，1M/factor4 服务容量达到 1,047,760 tokens。
+- 1M 只完成容量启动和 16K 回归；接近 1M 的冷 prefill 预计需要数小时，未做全长正确性声明。
+- 生成速度仍约 7.3–7.6 tok/s。CHUNK 对同轮 64K 冷 prefill 提升 8.12%；LOOP1、RMSNorm、8192 chunk 均未显示足够稳定的收益，CUDA Graph 在该社区路径有 OOM/挂死记录，默认不启用。
 - 经过接近 7K 输入的 Codex 长请求后，CoreX 缓存的工作区会使 GPU0–3 显存升至约 30GB；0.80 的启动参数已为 eager SDPA 留出临时空间。
 - CoreX 基础镜像未随仓库分发，也没有发布到 Docker Hub；当前没有找到足以证明该私有运行时可公开再分发的授权文本。
 
@@ -159,7 +182,7 @@ bash scripts/install_codex_integration.sh http://QWEN_HOST:1112/v1
 codex-qwen38 exec --ephemeral --skip-git-repo-check '只回答 CODEX_QWEN_OK'
 ```
 
-单行执行时不要附加反斜杠；多行命令只能在每个待续行末尾使用一个 `\`。bridge 会用上游 tokenizer 精确计算 token 预算，并在 94K 输入安全线内保留最多 4096 输出 tokens。
+单行执行时不要附加反斜杠；多行命令只能在每个待续行末尾使用一个 `\`。bridge 会用上游 tokenizer 精确计算 token 预算，并在 390K 输入安全线内保留最多 8192 输出 tokens。
 
 安装、普通回复测试、真实工具调用测试及卸载方法见 [Codex CLI 接入与手动验收](docs/CODEX.md)。
 
