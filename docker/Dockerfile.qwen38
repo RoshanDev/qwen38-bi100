@@ -1,0 +1,10 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+LABEL org.opencontainers.image.title="Qwen3.8-27B text-only on Iluvatar BI-V100"
+LABEL org.opencontainers.image.description="CoreX vLLM with the Qwen3.6 dense Qwen3_5 adapter reused for Qwen3.8-27B"
+LABEL org.opencontainers.image.revision="0e89906481e9a6cb2475925adb41517676e12903"
+
+WORKDIR /workspace
+COPY qwen3_6_scripts /workspace/qwen3_6_scripts
+RUN cd /workspace/qwen3_6_scripts && ./patch_ops.sh

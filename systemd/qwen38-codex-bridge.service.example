@@ -1,0 +1,14 @@
+[Unit]
+Description=Qwen3.8 Responses compatibility bridge for Codex CLI
+After=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=@RUNTIME_DIR@/bridge.env
+ExecStart=/usr/bin/python3 @PROJECT_ROOT@/bridge/responses_to_chat.py --host 127.0.0.1 --port 8348
+WorkingDirectory=@PROJECT_ROOT@
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.venv/
+
+# Local runtime state and secrets must stay outside the repository.
+bridge.env
+*.local.toml
+
+# Research/planning logs contain machine-specific operational history.
+findings.md
+progress.md
+task_plan.md
+.code-review-graph/

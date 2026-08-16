@@ -1,0 +1,35 @@
+model = "Qwen3.8-27B"
+model_provider = "qwen38_bridge"
+model_context_window = 8192
+model_auto_compact_token_limit = 7168
+model_reasoning_summary = "none"
+project_doc_max_bytes = 4096
+web_search = "disabled"
+
+[analytics]
+enabled = false
+
+[model_providers.qwen38_bridge]
+name = "Qwen3.8-27B via local Responses bridge"
+base_url = "http://127.0.0.1:8348/v1"
+wire_api = "responses"
+requires_openai_auth = false
+request_max_retries = 1
+stream_max_retries = 1
+stream_idle_timeout_ms = 3600000
+
+[features]
+apps = false
+browser_use = false
+computer_use = false
+goals = false
+hooks = false
+image_generation = false
+multi_agent = false
+plugins = false
+recommended_plugins = false
+remote_plugin = false
+shell_snapshot = false
+skill_search = false
+tool_suggest = false
+workspace_dependencies = false
