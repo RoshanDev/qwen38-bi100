@@ -45,6 +45,15 @@ curl --noproxy '*' -fsS http://127.0.0.1:8348/healthz
 
 ```bash
 mkdir -p /tmp/qwen38-codex-test
+codex-qwen38 exec --strict-config --ephemeral --skip-git-repo-check --ignore-rules -C /tmp/qwen38-codex-test '只回答 CODEX_QWEN_OK，不要调用工具。'
+```
+
+这是最不容易复制错的单行版本。提示词已经放在单引号中，`CODEX_QWEN_OK` 的下划线不需要写成 `\_`。
+
+如果希望换行书写，必须只使用一个反斜杠，而且反斜杠必须是该行最后一个字符：
+
+```bash
+mkdir -p /tmp/qwen38-codex-test
 codex-qwen38 exec \
   --strict-config \
   --ephemeral \
@@ -53,6 +62,8 @@ codex-qwen38 exec \
   -C /tmp/qwen38-codex-test \
   '只回答 CODEX_QWEN_OK，不要调用工具。'
 ```
+
+不要把命令写成 `exec \\ --strict-config` 或 `exec \ --strict-config`：前者会把 `\` 作为参数，后者会把反斜杠后的空格合并进下一个参数。
 
 预期最后一行是：
 
@@ -63,13 +74,7 @@ CODEX_QWEN_OK
 再测试真实工具调用：
 
 ```bash
-codex-qwen38 exec \
-  --strict-config \
-  --ephemeral \
-  --skip-git-repo-check \
-  --ignore-rules \
-  -C /tmp/qwen38-codex-test \
-  '必须调用 exec_command 工具执行命令 printf CODEX_TOOL_OK，然后只回答该命令的输出。'
+codex-qwen38 exec --strict-config --ephemeral --skip-git-repo-check --ignore-rules -C /tmp/qwen38-codex-test '必须调用 exec_command 工具执行命令 printf CODEX_TOOL_OK，然后只回答该命令的输出。'
 ```
 
 输出中应同时出现工具执行记录和最终答案：
@@ -91,6 +96,17 @@ codex-qwen38
 ```bash
 codex
 ```
+
+## 8K 上下文保护
+
+Codex 的系统提示、工具 schema 和项目说明可能在首轮就占用数千 tokens。bridge 会执行以下保护：
+
+- 压缩只适用于 Codex 内建长系统提示，不改用户提示或项目说明；
+- 调用上游 `/tokenize` 计算真实输入大小，并动态缩小输出预算；
+- 超限时截短旧工具输出，单 turn 最多执行 3 次工具调用；
+- 6000 tokens 触发 Codex 历史压缩，bridge 的安全预填充上限为 7000 tokens。
+
+这能避免旧版 eager SDPA 在接近 8K 时因临时显存不足而终止整个引擎。两条 metadata/skills 警告不影响调用；真正失败会显示 HTTP 状态或 `ERROR`。
 
 ## 明确指定隔离配置
 

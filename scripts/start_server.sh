@@ -6,6 +6,7 @@ MODEL_DIR="${MODEL_DIR:-/data/qwen38/models/Qwen3.8-27B}"
 CONTAINER_NAME="${CONTAINER_NAME:-qwen38-bi100-server}"
 CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3}"
 PORT="${PORT:-1111}"
+GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.80}"
 
 if [[ ! -f "${MODEL_DIR}/model.safetensors.index.json" ]]; then
   echo "model is incomplete: ${MODEL_DIR}" >&2
@@ -39,4 +40,4 @@ docker run -d \
   --enforce-eager \
   --trust-remote-code \
   --tensor-parallel-size 4 \
-  --gpu-memory-utilization 0.90
+  --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}"

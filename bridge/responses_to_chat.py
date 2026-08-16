@@ -31,6 +31,19 @@ TOOL_PARAMETER_RE = re.compile(
     re.DOTALL,
 )
 THINK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
+COMPACT_CODEX_INSTRUCTIONS = (
+    "You are a coding agent running in the Codex CLI. Follow system, developer, "
+    "and user instructions in priority order. Use the available tools when needed "
+    "to inspect files, run commands, edit code, and verify results. Never claim an "
+    "action succeeded unless its result was observed. Keep progress updates and the "
+    "final answer concise. Minimize tool calls: for overview or informational "
+    "questions, inspect at most one relevant file and then answer. Never repeat a "
+    "tool call already shown in the conversation. Continue using tools only when an "
+    "implementation or verification task genuinely requires them. Respect the "
+    "configured sandbox and approval policy. For an informational request, keep the "
+    "final answer under 300 Chinese characters unless the user asks for detail, and "
+    "never repeat the final answer."
+)
 
 
 def _new_id(prefix: str) -> str:
@@ -66,11 +79,26 @@ def _content_text(content: Any) -> str:
     return "\n".join(part for part in parts if part)
 
 
-def responses_input_to_chat(body: dict[str, Any]) -> list[dict[str, Any]]:
+def compact_codex_instructions(instructions: str, enabled: bool) -> str:
+    if (
+        enabled
+        and len(instructions) > 2000
+        and "Codex CLI" in instructions
+        and "coding agent" in instructions
+    ):
+        return COMPACT_CODEX_INSTRUCTIONS
+    return instructions
+
+
+def responses_input_to_chat(
+    body: dict[str, Any], *, compact_codex_prompt: bool = False
+) -> list[dict[str, Any]]:
     system_parts: list[str] = []
     instructions = body.get("instructions")
     if isinstance(instructions, str) and instructions.strip():
-        system_parts.append(instructions.strip())
+        system_parts.append(
+            compact_codex_instructions(instructions.strip(), compact_codex_prompt)
+        )
 
     messages: list[dict[str, Any]] = []
     input_value = body.get("input", [])
@@ -205,9 +233,50 @@ def tools_as_system_prompt(tools: list[dict[str, Any]]) -> str:
     )
 
 
-def responses_request_to_chat(body: dict[str, Any]) -> dict[str, Any]:
-    messages = responses_input_to_chat(body)
-    tools = responses_tools_to_chat(body.get("tools"))
+def trim_tool_messages(messages: list[dict[str, Any]], max_chars: int) -> bool:
+    """Bound verbose command output before retrying an oversized prompt."""
+    if max_chars < 200:
+        raise ValueError("max_chars must be at least 200")
+    changed = False
+    head_chars = max_chars * 3 // 4
+    tail_chars = max_chars - head_chars
+    marker = "\n...[tool output truncated by bridge]...\n"
+
+    for message in messages:
+        if message.get("role") != "tool":
+            continue
+        content = message.get("content")
+        if not isinstance(content, str) or len(content) <= max_chars:
+            continue
+        message["content"] = (
+            content[:head_chars] + marker + content[-tail_chars:]
+        )
+        changed = True
+    return changed
+
+
+def prior_function_call_count(body: dict[str, Any]) -> int:
+    input_value = body.get("input")
+    if not isinstance(input_value, list):
+        return 0
+    return sum(
+        1
+        for item in input_value
+        if isinstance(item, dict) and item.get("type") == "function_call"
+    )
+
+
+def responses_request_to_chat(
+    body: dict[str, Any],
+    *,
+    compact_codex_prompt: bool = False,
+    allow_tools: bool = True,
+    max_output_tokens: int = 512,
+) -> dict[str, Any]:
+    messages = responses_input_to_chat(
+        body, compact_codex_prompt=compact_codex_prompt
+    )
+    tools = responses_tools_to_chat(body.get("tools")) if allow_tools else []
     tool_prompt = tools_as_system_prompt(tools)
     if tool_prompt:
         if messages and messages[0].get("role") == "system":
@@ -220,7 +289,9 @@ def responses_request_to_chat(body: dict[str, Any]) -> dict[str, Any]:
         "messages": messages,
         "stream": False,
         "temperature": float(body.get("temperature", 0.0)),
-        "max_tokens": int(body.get("max_output_tokens") or 1024),
+        "max_tokens": min(
+            int(body.get("max_output_tokens") or max_output_tokens), max_output_tokens
+        ),
         "chat_template_kwargs": {"enable_thinking": False},
     }
 
@@ -430,6 +501,14 @@ class Settings:
     upstream_api_key: str
     timeout_seconds: int
     use_system_proxy: bool
+    max_context_tokens: int
+    max_input_tokens: int
+    max_tool_output_chars: int
+    max_tool_calls_per_turn: int
+    max_output_tokens: int
+    token_safety_margin: int
+    fallback_max_output_tokens: int
+    compact_codex_prompt: bool
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -441,19 +520,44 @@ class Settings:
             timeout_seconds=int(os.environ.get("QWEN_UPSTREAM_TIMEOUT_SECONDS", "3600")),
             use_system_proxy=os.environ.get("QWEN_UPSTREAM_USE_SYSTEM_PROXY", "0").lower()
             in {"1", "true", "yes", "on"},
+            max_context_tokens=int(os.environ.get("QWEN_MAX_CONTEXT_TOKENS", "8192")),
+            max_input_tokens=int(os.environ.get("QWEN_MAX_INPUT_TOKENS", "7000")),
+            max_tool_output_chars=int(
+                os.environ.get("QWEN_MAX_TOOL_OUTPUT_CHARS", "2000")
+            ),
+            max_tool_calls_per_turn=int(
+                os.environ.get("QWEN_MAX_TOOL_CALLS_PER_TURN", "3")
+            ),
+            max_output_tokens=int(
+                os.environ.get("QWEN_MAX_OUTPUT_TOKENS", "512")
+            ),
+            token_safety_margin=int(os.environ.get("QWEN_TOKEN_SAFETY_MARGIN", "64")),
+            fallback_max_output_tokens=int(
+                os.environ.get("QWEN_FALLBACK_MAX_OUTPUT_TOKENS", "512")
+            ),
+            compact_codex_prompt=os.environ.get(
+                "QWEN_COMPACT_CODEX_INSTRUCTIONS", "1"
+            ).lower()
+            in {"1", "true", "yes", "on"},
         )
 
     @property
     def chat_url(self) -> str:
         return f"{self.upstream_base_url}/chat/completions"
 
+    @property
+    def tokenize_url(self) -> str:
+        return f"{self.upstream_base_url.removesuffix('/v1')}/tokenize"
 
-def call_upstream(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
+
+def call_upstream_json(
+    settings: Settings, url: str, payload: dict[str, Any]
+) -> dict[str, Any]:
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
     if settings.upstream_api_key:
         headers["Authorization"] = f"Bearer {settings.upstream_api_key}"
     request = urllib_request.Request(
-        settings.chat_url,
+        url,
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
         headers=headers,
         method="POST",
@@ -471,6 +575,70 @@ def call_upstream(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]
         raise RuntimeError(f"upstream HTTP {exc.code}: {error_body}") from exc
     except urllib_error.URLError as exc:
         raise RuntimeError(f"failed to reach upstream: {exc.reason}") from exc
+
+
+def clamp_output_tokens(
+    requested: int,
+    input_tokens: int,
+    context_tokens: int,
+    safety_margin: int,
+) -> int:
+    available = context_tokens - input_tokens - safety_margin
+    if available < 1:
+        raise RuntimeError(
+            "prompt is too large for the upstream model: "
+            f"input_tokens={input_tokens}, context_tokens={context_tokens}, "
+            f"safety_margin={safety_margin}"
+        )
+    return min(requested, available)
+
+
+def fit_upstream_token_budget(settings: Settings, payload: dict[str, Any]) -> int | None:
+    tokenize_payload = {
+        "model": payload["model"],
+        "messages": payload["messages"],
+        "add_generation_prompt": True,
+    }
+    try:
+        result = call_upstream_json(settings, settings.tokenize_url, tokenize_payload)
+        input_tokens = int(result["count"])
+        if input_tokens > settings.max_input_tokens and trim_tool_messages(
+            payload["messages"], settings.max_tool_output_chars
+        ):
+            tokenize_payload["messages"] = payload["messages"]
+            result = call_upstream_json(settings, settings.tokenize_url, tokenize_payload)
+            input_tokens = int(result["count"])
+        if input_tokens > settings.max_input_tokens:
+            raise RuntimeError(
+                "prompt exceeds the safe prefill budget: "
+                f"input_tokens={input_tokens}, max_input_tokens={settings.max_input_tokens}"
+            )
+        payload["max_tokens"] = clamp_output_tokens(
+            int(payload["max_tokens"]),
+            input_tokens,
+            settings.max_context_tokens,
+            settings.token_safety_margin,
+        )
+        return input_tokens
+    except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+        if isinstance(exc, RuntimeError) and (
+            str(exc).startswith("prompt is too large")
+            or str(exc).startswith("prompt exceeds the safe prefill budget")
+        ):
+            raise
+        payload["max_tokens"] = min(
+            int(payload["max_tokens"]), settings.fallback_max_output_tokens
+        )
+        print(
+            "token_budget_fallback "
+            f"max_tokens={payload['max_tokens']} reason={type(exc).__name__}",
+            flush=True,
+        )
+        return None
+
+
+def call_upstream(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
+    return call_upstream_json(settings, settings.chat_url, payload)
 
 
 class BridgeHandler(BaseHTTPRequestHandler):
@@ -516,7 +684,18 @@ class BridgeHandler(BaseHTTPRequestHandler):
         started = time.perf_counter()
         try:
             body = self._read_json()
-            payload = responses_request_to_chat(body)
+            prior_tool_calls = prior_function_call_count(body)
+            payload = responses_request_to_chat(
+                body,
+                compact_codex_prompt=self.server.settings.compact_codex_prompt,
+                allow_tools=(
+                    prior_tool_calls < self.server.settings.max_tool_calls_per_turn
+                ),
+                max_output_tokens=self.server.settings.max_output_tokens,
+            )
+            estimated_input_tokens = fit_upstream_token_budget(
+                self.server.settings, payload
+            )
             upstream = call_upstream(self.server.settings, payload)
             response = make_response(body, upstream)
         except (ValueError, json.JSONDecodeError) as exc:
@@ -534,6 +713,9 @@ class BridgeHandler(BaseHTTPRequestHandler):
             "request_ok "
             f"model={body.get('model')} "
             f"input_items={len(body.get('input', [])) if isinstance(body.get('input'), list) else 1} "
+            f"prior_tool_calls={prior_tool_calls} "
+            f"estimated_input_tokens={estimated_input_tokens} "
+            f"max_tokens={payload['max_tokens']} "
             f"output_items={len(response['output'])} elapsed={elapsed:.3f}s",
             flush=True,
         )

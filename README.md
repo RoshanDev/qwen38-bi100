@@ -14,7 +14,7 @@
 | 模型目录 | `/data/qwen38/models/Qwen3.8-27B` |
 | GPU | 0–3，TP=4 |
 | 上下文 | 8192 |
-| 运行方式 | FP16、eager、`max-num-seqs=1` |
+| 运行方式 | FP16、eager、`max-num-seqs=1`、显存利用率 0.80 |
 | 稳态显存 | 约 24.9–25.1GB/卡 |
 | 512-token 端到端吞吐 | 7.985 tok/s |
 
@@ -118,6 +118,7 @@ bash scripts/build_image.sh
 - 未启用 MTP 推测解码、FP8、chunked prefill 或 CUDA graph。
 - 第一轮只验证到 8K 上下文；官方 262K 上限不能据此视为已支持。
 - 服务使用 GPU 0–3；GPU 4–7 保持空闲。
+- 经过接近 7K 输入的 Codex 长请求后，CoreX 缓存的工作区会使 GPU0–3 显存升至约 30GB；0.80 的启动参数已为 eager SDPA 留出临时空间。
 - CoreX 基础镜像未随仓库分发，也没有发布到 Docker Hub；当前没有找到足以证明该私有运行时可公开再分发的授权文本。
 
 ## Codex CLI
@@ -128,6 +129,8 @@ bash scripts/build_image.sh
 bash scripts/install_codex_integration.sh http://QWEN_HOST:1111/v1
 codex-qwen38 exec --ephemeral --skip-git-repo-check '只回答 CODEX_QWEN_OK'
 ```
+
+单行执行时不要附加反斜杠；多行命令只能在每个待续行末尾使用一个 `\`。bridge 会压缩 Codex 内建长提示、精确计算 token 预算、限制旧工具输出和单轮工具次数，以适配当前 8K/eager 运行时。
 
 安装、普通回复测试、真实工具调用测试及卸载方法见 [Codex CLI 接入与手动验收](docs/CODEX.md)。
 
