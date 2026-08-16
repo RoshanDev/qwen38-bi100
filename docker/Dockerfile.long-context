@@ -1,0 +1,42 @@
+ARG COREX_BASE_IMAGE
+ARG QWEN38_BASE_IMAGE
+
+# Generate the long-context vLLM files from a clean vendor vLLM tree.  The
+# d972854 patcher is intentionally run against the unmodified CoreX image;
+# running it on top of the older 0e899 fallback would leave that fallback in
+# place because the upstream patcher treats its marker as already patched.
+FROM ${COREX_BASE_IMAGE} AS vllm-long-patch
+WORKDIR /workspace/qwen3_6_scripts
+COPY qwen3_6_scripts/patch_xformers_sdpa_seq.py ./
+RUN python3 ./patch_xformers_sdpa_seq.py
+
+FROM ${QWEN38_BASE_IMAGE}
+
+LABEL org.opencontainers.image.title="Qwen3.8-27B long-context text inference on Iluvatar BI-V100"
+LABEL org.opencontainers.image.description="Incremental dense d972854 chunked-prefill adapter with optional Qwen3.8 YaRN support"
+LABEL org.opencontainers.image.revision="d972854fb79f47aa6ab1b9a5a45d27ca99c8c5ab"
+
+COPY --from=vllm-long-patch \
+  /usr/local/corex/lib/python3/dist-packages/vllm/attention/backends/xformers.py \
+  /usr/local/corex/lib/python3/dist-packages/vllm/attention/backends/xformers.py
+COPY --from=vllm-long-patch \
+  /usr/local/corex/lib/python3/dist-packages/vllm/engine/arg_utils.py \
+  /usr/local/corex/lib/python3/dist-packages/vllm/engine/arg_utils.py
+COPY --from=vllm-long-patch \
+  /usr/local/corex/lib/python3/dist-packages/vllm/model_executor/layers/logits_processor.py \
+  /usr/local/corex/lib/python3/dist-packages/vllm/model_executor/layers/logits_processor.py
+
+COPY qwen3_6_scripts/paged_attn.py \
+  /usr/local/corex/lib/python3/dist-packages/vllm/attention/ops/paged_attn.py
+COPY qwen3_6_scripts/qwen3_5.py \
+  /usr/local/corex/lib/python3/dist-packages/vllm/model_executor/models/qwen3_5.py
+COPY qwen3_6_scripts/sequence.py \
+  /usr/local/corex/lib/python3/dist-packages/vllm/sequence.py
+
+RUN python3 -m py_compile \
+      /usr/local/corex/lib/python3/dist-packages/vllm/attention/backends/xformers.py \
+      /usr/local/corex/lib/python3/dist-packages/vllm/attention/ops/paged_attn.py \
+      /usr/local/corex/lib/python3/dist-packages/vllm/model_executor/models/qwen3_5.py \
+      /usr/local/corex/lib/python3/dist-packages/vllm/sequence.py \
+    && ! grep -R "/tmp/vllm_decode_debug.log" \
+      /usr/local/corex/lib/python3/dist-packages/vllm/model_executor/models/qwen3_5.py

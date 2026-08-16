@@ -4,21 +4,29 @@
 
 ## 已验证状态
 
-2026-08-16 已在一台 8×BI-V100 32GB 服务器上实测部署成功，服务当前保持运行。
+2026-08-16 已在一台 8×BI-V100 32GB 服务器上实测部署成功。8K 回滚服务与 100K 长上下文服务当前同时运行。
 
-| 项目 | 值 |
-|---|---|
-| API | `http://QWEN_HOST:1111/v1` |
-| 服务容器 | `qwen38-bi100-server` |
-| 派生镜像 | `qwen38-bi100:corex3.2.3-text-0e899` |
-| 模型目录 | `/data/qwen38/models/Qwen3.8-27B` |
-| GPU | 0–3，TP=4 |
-| 上下文 | 8192 |
-| 运行方式 | FP16、eager、`max-num-seqs=1`、显存利用率 0.80 |
-| 稳态显存 | 约 24.9–25.1GB/卡 |
-| 512-token 端到端吞吐 | 7.985 tok/s |
+| 项目 | 8K 回滚服务 | 100K 主服务 |
+|---|---|---|
+| API | `http://QWEN_HOST:1111/v1` | `http://QWEN_HOST:1112/v1` |
+| 容器 | `qwen38-bi100-server` | `qwen38-bi100-longctx` |
+| 镜像 | `qwen38-bi100:corex3.2.3-text-0e899` | `qwen38-bi100:corex3.2.3-longctx-d972` |
+| GPU | 0–3，TP=4 | 4–7，TP=4 |
+| 上下文 | 8192 | 100000 |
+| 关键参数 | eager、显存利用率 0.80 | eager、chunked prefill=4096、显存利用率 0.95 |
 
 模型固定在官方 revision `1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0`。18 个权重分片、1199 个索引键和总字节均已离线校验。
+
+长上下文不是只验证了启动参数。双口令分别埋在提示词约 10% 和 90% 位置，实际结果如下：
+
+| 实际 prompt tokens | 端到端耗时 | 检索结果 |
+|---:|---:|---|
+| 15,971 | 26.684s | 通过 |
+| 31,965 | 57.354s | 通过 |
+| 63,953 | 142.991s | 通过 |
+| 95,963 | 255.270s | 通过 |
+
+因此 Codex 使用 100K context、94K bridge 输入安全线和 90K 自动压缩阈值，给输出与协议保留余量。
 
 ## 调用示例
 
@@ -26,7 +34,7 @@
 
 ```bash
 curl --noproxy '*' -sS \
-  http://QWEN_HOST:1111/v1/chat/completions \
+  http://QWEN_HOST:1112/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "Qwen3.8-27B",
@@ -49,6 +57,8 @@ curl --noproxy '*' -sS \
 ssh root@QWEN_HOST
 docker ps --filter name=qwen38-bi100-server
 docker logs -f --tail=200 qwen38-bi100-server
+docker ps --filter name=qwen38-bi100-longctx
+docker logs -f --tail=200 qwen38-bi100-longctx
 ```
 
 停止和重新启动现有容器：
@@ -64,11 +74,20 @@ docker start qwen38-bi100-server
 bash /data/qwen38/scripts/start_server.sh
 ```
 
+重建 100K 服务：
+
+```bash
+bash /data/qwen38/deployment/qwen38-bi100/scripts/start_long_context_server.sh
+```
+
 重新执行正确性测试和基准：
 
 ```bash
 python3 /data/qwen38/scripts/smoke_api.py --wait-seconds 60
 python3 /data/qwen38/scripts/benchmark_api.py --max-tokens 512
+python3 /data/qwen38/deployment/qwen38-bi100/scripts/test_long_context.py \
+  --base-url http://127.0.0.1:1112 \
+  --target-input-tokens 96000
 ```
 
 ## 校验与复现
@@ -112,12 +131,22 @@ bash scripts/build_image.sh
 
 构建脚本会临时获取并严格校验社区适配提交 `0e899064...`，不会把第三方补丁源码复制进本仓库。CoreX 基础镜像需通过你有权使用的天数渠道自行取得并预先导入本机。
 
+长上下文镜像使用最后一个 dense 适配提交 `d972854...` 做增量构建，不需要重新联网安装依赖：
+
+```bash
+COREX_BASE_IMAGE='YOUR_AUTHORIZED_COREX_3_2_3_LLM_IMAGE:v1.2.3' \
+QWEN38_BASE_IMAGE='qwen38-bi100:corex3.2.3-text-0e899' \
+bash scripts/build_long_context_image.sh
+```
+
+详细原理、1M 探针与验收步骤见 [长上下文适配与实测](docs/LONG_CONTEXT.md)。
+
 ## 已知边界
 
 - 当前适配仅验证文本推理，不支持图片输入。
-- 未启用 MTP 推测解码、FP8、chunked prefill 或 CUDA graph。
-- 第一轮只验证到 8K 上下文；官方 262K 上限不能据此视为已支持。
-- 服务使用 GPU 0–3；GPU 4–7 保持空闲。
+- 未启用 MTP 推测解码、FP8 或 CUDA graph。
+- 100K 服务启用了社区 dense chunked-prefill/paged-attention 路径；当前最高真实检索为 95,963 prompt tokens。
+- Qwen3.8 官方支持 262,144 原生上下文并可用 YaRN 扩至 1M，但当前 TP4/CoreX 实机只能分配 261,936 tokens 的 KV cache，1M 启动探针被 vLLM 正确拒绝，不能通过客户端虚报为 1M。
 - 经过接近 7K 输入的 Codex 长请求后，CoreX 缓存的工作区会使 GPU0–3 显存升至约 30GB；0.80 的启动参数已为 eager SDPA 留出临时空间。
 - CoreX 基础镜像未随仓库分发，也没有发布到 Docker Hub；当前没有找到足以证明该私有运行时可公开再分发的授权文本。
 
@@ -126,11 +155,11 @@ bash scripts/build_image.sh
 仓库提供 Responses → Chat Completions 本地 bridge 和完全隔离的 Codex 配置。它不会覆盖 `~/.codex/config.toml`；OpenAI 官方 Codex 继续使用 `codex`，Qwen 入口使用 `codex-qwen38`。
 
 ```bash
-bash scripts/install_codex_integration.sh http://QWEN_HOST:1111/v1
+bash scripts/install_codex_integration.sh http://QWEN_HOST:1112/v1
 codex-qwen38 exec --ephemeral --skip-git-repo-check '只回答 CODEX_QWEN_OK'
 ```
 
-单行执行时不要附加反斜杠；多行命令只能在每个待续行末尾使用一个 `\`。bridge 会压缩 Codex 内建长提示、精确计算 token 预算、限制旧工具输出和单轮工具次数，以适配当前 8K/eager 运行时。
+单行执行时不要附加反斜杠；多行命令只能在每个待续行末尾使用一个 `\`。bridge 会用上游 tokenizer 精确计算 token 预算，并在 94K 输入安全线内保留最多 4096 输出 tokens。
 
 安装、普通回复测试、真实工具调用测试及卸载方法见 [Codex CLI 接入与手动验收](docs/CODEX.md)。
 
@@ -138,5 +167,6 @@ codex-qwen38 exec --ephemeral --skip-git-repo-check '只回答 CODEX_QWEN_OK'
 
 - [Qwen3.8-27B 官方模型](https://huggingface.co/Qwen/Qwen3.8-27B)
 - [BI-V100 社区适配提交](https://dev.modelhub.org.cn/icer/qwen36_01/commit/0e89906481e9a6cb2475925adb41517676e12903)
+- [BI-V100 dense 100K 提交](https://dev.modelhub.org.cn/icer/qwen36_01/commit/d972854fb79f47aa6ab1b9a5a45d27ca99c8c5ab)
 - [社区四卡运行记录](https://dev.modelhub.org.cn/icer/qwen36_01/src/branch/main/worklogs/2026-07-13-initial-run.md)
 - [用户提供的天数知识库参考页](https://ixkb.iluvatar.com.cn:9443/webdoc/view/Pub8a16948a9a4cb023019cbca37f861590.html)

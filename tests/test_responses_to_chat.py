@@ -119,7 +119,7 @@ class ResponsesBridgeTests(unittest.TestCase):
         }
         payload = responses_request_to_chat(body, allow_tools=False)
         self.assertNotIn("# Tools", payload["messages"][0]["content"])
-        self.assertEqual(512, payload["max_tokens"])
+        self.assertEqual(4096, payload["max_tokens"])
 
 
 if __name__ == "__main__":

@@ -11,7 +11,7 @@ SERVICE_FILE="${CONFIG_ROOT}/systemd/user/qwen38-codex-bridge.service"
 UPSTREAM_URL="${1:-${QWEN_UPSTREAM_BASE_URL:-}}"
 
 if [[ -z "${UPSTREAM_URL}" ]]; then
-  echo "usage: $0 http://QWEN_HOST:1111/v1" >&2
+  echo "usage: $0 http://QWEN_HOST:1112/v1" >&2
   exit 2
 fi
 
@@ -29,14 +29,14 @@ if [[ ! -f "${RUNTIME_DIR}/bridge.env" ]]; then
     printf 'QWEN_UPSTREAM_BASE_URL=%s\n' "${UPSTREAM_URL}"
     printf 'QWEN_UPSTREAM_TIMEOUT_SECONDS=3600\n'
     printf 'QWEN_UPSTREAM_USE_SYSTEM_PROXY=0\n'
-    printf 'QWEN_MAX_CONTEXT_TOKENS=8192\n'
-    printf 'QWEN_MAX_INPUT_TOKENS=7000\n'
-    printf 'QWEN_MAX_TOOL_OUTPUT_CHARS=2000\n'
-    printf 'QWEN_MAX_TOOL_CALLS_PER_TURN=3\n'
-    printf 'QWEN_MAX_OUTPUT_TOKENS=512\n'
-    printf 'QWEN_TOKEN_SAFETY_MARGIN=64\n'
-    printf 'QWEN_FALLBACK_MAX_OUTPUT_TOKENS=512\n'
-    printf 'QWEN_COMPACT_CODEX_INSTRUCTIONS=1\n'
+    printf 'QWEN_MAX_CONTEXT_TOKENS=100000\n'
+    printf 'QWEN_MAX_INPUT_TOKENS=94000\n'
+    printf 'QWEN_MAX_TOOL_OUTPUT_CHARS=16000\n'
+    printf 'QWEN_MAX_TOOL_CALLS_PER_TURN=32\n'
+    printf 'QWEN_MAX_OUTPUT_TOKENS=4096\n'
+    printf 'QWEN_TOKEN_SAFETY_MARGIN=256\n'
+    printf 'QWEN_FALLBACK_MAX_OUTPUT_TOKENS=4096\n'
+    printf 'QWEN_COMPACT_CODEX_INSTRUCTIONS=0\n'
     printf 'QWEN_BRIDGE_HOST=127.0.0.1\n'
     printf 'QWEN_BRIDGE_PORT=8348\n'
   } >"${RUNTIME_DIR}/bridge.env"

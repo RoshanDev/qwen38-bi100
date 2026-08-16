@@ -1,9 +1,9 @@
 model = "Qwen3.8-27B"
 model_provider = "qwen38_bridge"
-model_context_window = 8192
-model_auto_compact_token_limit = 6000
+model_context_window = 100000
+model_auto_compact_token_limit = 90000
 model_reasoning_summary = "none"
-project_doc_max_bytes = 4096
+project_doc_max_bytes = 32768
 web_search = "disabled"
 
 [analytics]

@@ -1,0 +1,33 @@
+diff --git a/qwen3_6_scripts/qwen3_5.py b/qwen3_6_scripts/qwen3_5.py
+index 371be71..3718a82 100644
+--- a/qwen3_6_scripts/qwen3_5.py
++++ b/qwen3_6_scripts/qwen3_5.py
+@@ -417,9 +417,6 @@ class GatedDeltaNet(nn.Module):
+ 
+         else:
+             # Decode: one token per sequence
+-            with open("/tmp/vllm_decode_debug.log", "a") as _f:
+-                _f.write(f"[deltanet decode] layer={self.layer_idx} num_seqs={hidden_states.shape[0]}\n")
+-                _f.flush()
+             num_seqs = hidden_states.shape[0]
+             weight_2d = self.conv1d_weight.squeeze(1)
+ 
+@@ -527,11 +524,18 @@ class Qwen3_5FullAttention(nn.Module):
+         partial_factor = rope_params.get("partial_rotary_factor", 0.25)
+         rotary_dim = int(self.head_dim * partial_factor)
+ 
++        # Preserve the verified native text-only path for the default MRoPE
++        # config.  For Qwen's documented 1M mode, pass the YaRN parameters to
++        # vLLM; the community adapter previously read them but discarded them.
++        rope_type = rope_params.get("rope_type", rope_params.get("type"))
++        rope_scaling = rope_params if rope_type == "yarn" else None
++
+         self.rotary_emb = get_rope(
+             self.head_dim,
+             rotary_dim=rotary_dim,
+             max_position=text_cfg.max_position_embeddings,
+             base=rope_theta,
++            rope_scaling=rope_scaling,
+         )
+ 
+         self.attn = Attention(

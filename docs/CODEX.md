@@ -15,13 +15,13 @@
 先确认直接 API 可访问，把 `QWEN_HOST` 换成推理服务器地址：
 
 ```bash
-curl --noproxy '*' -fsS http://QWEN_HOST:1111/health
+curl --noproxy '*' -fsS http://QWEN_HOST:1112/health
 ```
 
 安装隔离配置、用户级 systemd 服务和启动命令：
 
 ```bash
-bash scripts/install_codex_integration.sh http://QWEN_HOST:1111/v1
+bash scripts/install_codex_integration.sh http://QWEN_HOST:1112/v1
 ```
 
 脚本只写入以下独立位置：
@@ -91,22 +91,36 @@ CODEX_TOOL_OK
 codex-qwen38
 ```
 
+可以用与此前中断场景相同的短提示验证：
+
+```text
+哈喽你好
+```
+
+本次实测返回正常中文问候，没有 `Conversation interrupted`。
+
 正常的 OpenAI Codex 仍使用原命令：
 
 ```bash
 codex
 ```
 
-## 8K 上下文保护
+## 100K 上下文预算
 
-Codex 的系统提示、工具 schema 和项目说明可能在首轮就占用数千 tokens。bridge 会执行以下保护：
+Codex 的系统提示、工具 schema 和项目说明在本机首轮约占 8K tokens，因此 8K 服务没有实际交互余量。当前配置为：
 
-- 压缩只适用于 Codex 内建长系统提示，不改用户提示或项目说明；
+- Codex `model_context_window=100000`；
+- 90,000 tokens 触发 Codex 历史压缩；
+- bridge 输入安全线为 94,000 tokens；
+- 单次输出上限 4,096 tokens，安全 margin 256；
+- 单条工具输出最多保留 16,000 字符，单 turn 最多 32 次工具调用；
+- 不再压缩 Codex 内建系统提示；
 - 调用上游 `/tokenize` 计算真实输入大小，并动态缩小输出预算；
-- 超限时截短旧工具输出，单 turn 最多执行 3 次工具调用；
-- 6000 tokens 触发 Codex 历史压缩，bridge 的安全预填充上限为 7000 tokens。
+- 超过安全线时先截短旧工具输出，再由 Codex 自动压缩历史。
 
-这能避免旧版 eager SDPA 在接近 8K 时因临时显存不足而终止整个引擎。两条 metadata/skills 警告不影响调用；真正失败会显示 HTTP 状态或 `ERROR`。
+本次普通回复和工具闭环分别实际使用 8,319 与 16,787 tokens，均通过。`Model metadata ... not found` 表示 Codex 没有内置此自定义模型的产品元数据；skills 描述缩短警告表示所有 skill 仍可见但描述更短。两者不影响已设置的 100K context；真正失败会显示 HTTP 状态或 `ERROR`。
+
+模型服务最高已用 95,963 prompt tokens 做双位置口令检索。完整记录见 [长上下文适配与实测](LONG_CONTEXT.md)。
 
 ## 明确指定隔离配置
 

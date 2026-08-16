@@ -271,7 +271,7 @@ def responses_request_to_chat(
     *,
     compact_codex_prompt: bool = False,
     allow_tools: bool = True,
-    max_output_tokens: int = 512,
+    max_output_tokens: int = 4096,
 ) -> dict[str, Any]:
     messages = responses_input_to_chat(
         body, compact_codex_prompt=compact_codex_prompt
@@ -514,29 +514,29 @@ class Settings:
     def from_env(cls) -> "Settings":
         return cls(
             upstream_base_url=os.environ.get(
-                "QWEN_UPSTREAM_BASE_URL", "http://127.0.0.1:1111/v1"
+                "QWEN_UPSTREAM_BASE_URL", "http://127.0.0.1:1112/v1"
             ).rstrip("/"),
             upstream_api_key=os.environ.get("QWEN_UPSTREAM_API_KEY", ""),
             timeout_seconds=int(os.environ.get("QWEN_UPSTREAM_TIMEOUT_SECONDS", "3600")),
             use_system_proxy=os.environ.get("QWEN_UPSTREAM_USE_SYSTEM_PROXY", "0").lower()
             in {"1", "true", "yes", "on"},
-            max_context_tokens=int(os.environ.get("QWEN_MAX_CONTEXT_TOKENS", "8192")),
-            max_input_tokens=int(os.environ.get("QWEN_MAX_INPUT_TOKENS", "7000")),
+            max_context_tokens=int(os.environ.get("QWEN_MAX_CONTEXT_TOKENS", "100000")),
+            max_input_tokens=int(os.environ.get("QWEN_MAX_INPUT_TOKENS", "94000")),
             max_tool_output_chars=int(
-                os.environ.get("QWEN_MAX_TOOL_OUTPUT_CHARS", "2000")
+                os.environ.get("QWEN_MAX_TOOL_OUTPUT_CHARS", "16000")
             ),
             max_tool_calls_per_turn=int(
-                os.environ.get("QWEN_MAX_TOOL_CALLS_PER_TURN", "3")
+                os.environ.get("QWEN_MAX_TOOL_CALLS_PER_TURN", "32")
             ),
             max_output_tokens=int(
-                os.environ.get("QWEN_MAX_OUTPUT_TOKENS", "512")
+                os.environ.get("QWEN_MAX_OUTPUT_TOKENS", "4096")
             ),
-            token_safety_margin=int(os.environ.get("QWEN_TOKEN_SAFETY_MARGIN", "64")),
+            token_safety_margin=int(os.environ.get("QWEN_TOKEN_SAFETY_MARGIN", "256")),
             fallback_max_output_tokens=int(
-                os.environ.get("QWEN_FALLBACK_MAX_OUTPUT_TOKENS", "512")
+                os.environ.get("QWEN_FALLBACK_MAX_OUTPUT_TOKENS", "4096")
             ),
             compact_codex_prompt=os.environ.get(
-                "QWEN_COMPACT_CODEX_INSTRUCTIONS", "1"
+                "QWEN_COMPACT_CODEX_INSTRUCTIONS", "0"
             ).lower()
             in {"1", "true", "yes", "on"},
         )
