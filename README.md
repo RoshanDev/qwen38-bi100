@@ -1,5 +1,7 @@
 # Qwen3.8-27B on Iluvatar BI-V100
 
+公开仓库：<https://github.com/RoshanDev/qwen38-bi100>
+
 ## 已验证状态
 
 2026-08-16 已在一台 8×BI-V100 32GB 服务器上实测部署成功，服务当前保持运行。
