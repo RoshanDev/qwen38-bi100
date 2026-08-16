@@ -102,6 +102,8 @@ CODEX_HOME="$HOME/.local/share/codex-qwen38" codex exec '只回答 OK'
 
 Codex 也支持命名 profile，但 custom provider 配置不支持放在项目 `.codex/config.toml` 中。这里选择独立 `CODEX_HOME`，可以把配置、状态和认证边界一起隔离。
 
+配置字段与优先级可对照 [OpenAI Codex configuration reference](https://developers.openai.com/codex/config-reference)。本仓库已实测 Codex CLI `0.147.0`。
+
 ## 日志与恢复
 
 ```bash
