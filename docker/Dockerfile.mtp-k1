@@ -1,0 +1,15 @@
+ARG BASE_IMAGE=qwen38-bi100:corex3.2.3-text-0e899
+FROM ${BASE_IMAGE}
+
+LABEL org.opencontainers.image.title="Qwen3.8-27B MTP K=1 experiment"
+LABEL org.opencontainers.image.description="Optional MTP K=1 via QWEN38_MTP_K1=1; Gemma RMSNorm (1+w)"
+
+COPY scripts/patch_qwen3_5_mtp.py /tmp/patch_qwen3_5_mtp.py
+COPY scripts/mtp_k1 /opt/mtp_k1
+RUN python3 /tmp/patch_qwen3_5_mtp.py \
+      /usr/local/corex-3.2.3/lib64/python3/dist-packages/vllm/model_executor/models/qwen3_5.py \
+    && python3 -m py_compile \
+      /usr/local/corex-3.2.3/lib64/python3/dist-packages/vllm/model_executor/models/qwen3_5.py \
+    && ln -sfn /opt/mtp_k1 /usr/local/corex-3.2.3/lib64/python3/dist-packages/mtp_k1 \
+    && rm -f /tmp/patch_qwen3_5_mtp.py
+ENV PYTHONPATH=/opt:/usr/local/corex-3.2.3/lib64/python3/dist-packages

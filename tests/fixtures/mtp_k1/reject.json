@@ -1,0 +1,10 @@
+{
+  "name": "fixture_reject",
+  "note": "Dummy-hidden / wrong RMSNorm draft 48185 (MASK) vs target 248046.",
+  "t0": 32,
+  "t1": 248046,
+  "draft1": 48185,
+  "accepted": false,
+  "rollback": true,
+  "emitted": [32, 248046]
+}

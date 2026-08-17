@@ -1,0 +1,13 @@
+{
+  "name": "fixture_accept",
+  "note": "Verified after Gemma RMSNorm fix. hidden=prompt last, input=t0=32 (A), draft=t1=248046.",
+  "t0": 32,
+  "t1": 248046,
+  "draft1": 248046,
+  "accepted": true,
+  "positions": [19, 20, 21, 22],
+  "rms": "gemma_one_plus_weight",
+  "concat": "embed_then_hidden",
+  "attn_gate": "sigmoid",
+  "emitted": [32, 248046]
+}
