@@ -1,34 +1,42 @@
 # BI-V100 长上下文适配与实测
 
-## 结论
+## 最终结论
 
-- Qwen3.8-27B 官方配置的原生上下文是 262,144 tokens；官方 model card 给出了静态 YaRN `factor=4.0` 扩展到 1,000,000 tokens 的方法。
-- 本项目在 4×BI-V100 32GB、TP=4、CoreX/vLLM 0.6.3 上实际跑通 100,000 上下文，并完成最高 95,963 prompt tokens 的双位置检索。
-- 同一环境的 1M YaRN 启动探针只能分配 261,936 tokens 的 KV cache，因此无法启动 1M 服务。Codex 当前配置为 100K，而不是虚报 1M。
+- Qwen3.8-27B 官方原生上下文为262,144 tokens，可用静态 YaRN 扩到1M。
+- 4×BI-V100 32GB、TP=4、CoreX/vLLM 0.6.3 上，400K/factor2 服务已完成398,971 prompt tokens 的双位置口令检索。
+- 1M/factor4 服务已成功启动，KV容量1,047,760 tokens，并通过16K回归；未执行接近1M的完整提示。
+- 400K冷请求耗时约44分35秒；容量可用不等于交互速度可用。
 
 官方模型说明：<https://huggingface.co/Qwen/Qwen3.8-27B>
 
-## 社区提交选择
+## 根因：64层被错误分配KV
 
-社区 dense 27B 提交链依次加入 20K、paged attention、50K、chunked prefill、100K 和大输入 token 统计修复。本项目固定使用最后一个 dense 提交：
+模型有64层，但只有16层是 `full_attention`，其余48层是 `linear_attention`。当前 vLLM 0.6.3 的缓存计算读取顶层：
 
-```text
-d972854fb79f47aa6ab1b9a5a45d27ca99c8c5ab
+```python
+layers = getattr(hf_config, "layers_block_type", ["attention"] * num_layers)
 ```
 
-其后的 `629f878...` 开始转为 MoE，不属于 dense Qwen3.8-27B 路线。
+Qwen配置只在 `text_config.layer_types` 保存混合层布局，顶层字段不存在，vLLM便按64个attention层计算和创建KV cache；模型前向实际只使用16份。
 
-原提交仍有一次 `/tmp/vllm_decode_debug.log` 写入，而且 Qwen3.5 adapter 读取了 `rope_parameters` 却没有向 vLLM `get_rope()` 传递 YaRN。本仓库的 [补丁](../patches/d972854-long-context.patch)只做两项修正：删除调试写入；仅在 `rope_type=yarn` 时传递 scaling 参数。默认 native 路径保持不变。
+旧探针数据恰好闭合：
 
-社区提交：<https://dev.modelhub.org.cn/icer/qwen36_01/commit/d972854fb79f47aa6ab1b9a5a45d27ca99c8c5ab>
+```text
+16371 blocks × 16 tokens = 261936 tokens
+```
 
-## 构建
+`prepare_yarn_model.py` 将 `full_attention` 映射成顶层 `attention`，保留 `linear_attention`。修复后动态调用返回16层，实机结果为：
 
-构建脚本不复制第三方源码进本仓库。它从本地社区仓库提取固定 commit，并以无模糊匹配的 `git apply --check` 应用本项目补丁：
+| overlay | GPU blocks | KV tokens | 服务结果 |
+|---|---:|---:|---|
+| 400K/factor2 | 66,149（基础）/65,629（CHUNK候选） | 约1.05M | ready |
+| 1M/factor4 | 65,485 | 1,047,760 | ready，1.05x concurrency |
+
+## 构建镜像
+
+先按固定 dense 提交 `d972854fb79f47aa6ab1b9a5a45d27ca99c8c5ab` 构建长上下文镜像：
 
 ```bash
-cd /data/qwen38/deployment/qwen38-bi100
-
 COREX_BASE_IMAGE='YOUR_AUTHORIZED_COREX_3_2_3_LLM_IMAGE:v1.2.3' \
 QWEN38_BASE_IMAGE='qwen38-bi100:corex3.2.3-text-0e899' \
 ADAPTER_REPO_DIR='/data/qwen38/src/enginex-vllm-bi100-qwen36' \
@@ -36,77 +44,115 @@ BUILD_ROOT='/data/qwen38/build' \
 bash scripts/build_long_context_image.sh
 ```
 
-生成镜像：
+再构建本项目的 dense native 实验层：
 
-```text
-qwen38-bi100:corex3.2.3-longctx-d972
+```bash
+BASE_IMAGE='qwen38-bi100:corex3.2.3-longctx-d972' \
+OUTPUT_IMAGE='qwen38-bi100:corex3.2.3-dense-native-v1' \
+bash scripts/build_dense_native_image.sh
 ```
 
-本次实测 image ID 为 `sha256:dc0a97ab3c6494cdf495cf5f075525cb57e3269fc7c5c8ff58c53ad41c1ab8cd`。
+实测 image ID：
 
-## 启动 100K 服务
+```text
+sha256:5ec386a3d4cb862eae915f2597d3ef945b0fd2d0eb7371edb3ea8be38214ce20
+```
 
-默认使用 GPU4–7 和端口1112，不会覆盖 GPU0–3/1111 的 8K 回滚服务：
+三个fastpath可独立控制，默认只有通过同轮A/B的CHUNK开启：
+
+```text
+QWEN38_LOOP1_NATIVE=0
+QWEN38_CHUNK_PARALLEL=1
+QWEN38_RMSNORM_NATIVE=0
+```
+
+## 创建overlay
+
+权重使用硬链接；只有配置和manifest独立，不会重复占用约56GB：
+
+```bash
+python3 scripts/prepare_yarn_model.py \
+  /data/qwen38/models/Qwen3.8-27B \
+  /data/qwen38/models/Qwen3.8-27B-YaRN-400K-kvfix \
+  --factor 2.0 \
+  --target-context 400000
+
+python3 scripts/prepare_yarn_model.py \
+  /data/qwen38/models/Qwen3.8-27B \
+  /data/qwen38/models/Qwen3.8-27B-YaRN-1M-kvfix \
+  --factor 4.0 \
+  --target-context 1000000
+```
+
+脚本会校验64层布局中恰有16个attention层，并确认源配置哈希在创建前后不变。
+
+## 启动400K服务
+
+默认配置使用GPU4–7、端口1112、TP4、4096 chunk：
 
 ```bash
 cd /data/qwen38/deployment/qwen38-bi100
 bash scripts/start_long_context_server.sh
 ```
 
-等到 ready：
+检查：
 
 ```bash
-docker logs -f --tail=200 qwen38-bi100-longctx
+docker logs -f --tail=200 qwen38-bi100-400k
 curl -fsS http://127.0.0.1:1112/health
 curl -fsS http://127.0.0.1:1112/v1/models | python3 -m json.tool
 ```
 
-模型列表应显示：
+## 启动1M专用端点
 
-```json
-"max_model_len": 100000
+1M不作为日常Codex端点。需要容量探针时，使用独立容器和端口：
+
+```bash
+CONTAINER_NAME=qwen38-bi100-1m \
+MODEL_DIR=/data/qwen38/models/Qwen3.8-27B-YaRN-1M-kvfix \
+PORT=1113 \
+MAX_MODEL_LEN=1000000 \
+QWEN38_CHUNK_PARALLEL=1 \
+bash scripts/start_long_context_server.sh
 ```
 
-## 真实长提示验收
+预期启动日志：
 
-脚本会把两个唯一识别码埋在提示词约 10% 和 90% 处，调用 `/tokenize` 贴近目标长度，再要求模型按顺序取回：
+```text
+# GPU blocks: 65485
+Maximum concurrency for 1000000 tokens per request: 1.05x
+```
+
+同一组GPU不能同时运行400K与1M服务；切换前先停止GPU4–7上的另一个容器。GPU0–3/1111的8K回滚服务可保持运行。
+
+## 正确性与性能实测
+
+测试把两个唯一识别码放在提示约10%和90%位置：
 
 ```bash
 python3 scripts/test_long_context.py \
   --base-url http://QWEN_HOST:1112 \
-  --target-input-tokens 96000
+  --target-input-tokens 399000 \
+  --timeout-seconds 7200
 ```
 
-本次结果：
+| 服务/配置 | 实际 prompt | 耗时 | 结果 |
+|---|---:|---:|---|
+| 原100K路径 | 15,971 | 26.684s | 通过 |
+| 原100K路径 | 31,965 | 57.354s | 通过 |
+| 原100K路径 | 63,953 | 142.991s | 通过 |
+| 原100K路径 | 95,963 | 255.270s | 通过 |
+| 400K/CHUNK | 63,953 | 134.966s | 通过 |
+| 400K/CHUNK | 271,965 | 1,350.743s | 通过 |
+| 400K/CHUNK | 398,971 | 2,675.417s | 通过 |
+| 1M/factor4 | 15,971 | 26.327s | 通过 |
 
-| 目标 | 实际 prompt tokens | 耗时 | 结果 |
-|---:|---:|---:|---|
-| 16K | 15,971 | 26.684s | 两个识别码正确 |
-| 32K | 31,965 | 57.354s | 两个识别码正确 |
-| 64K | 63,953 | 142.991s | 两个识别码正确 |
-| 96K | 95,963 | 255.270s | 两个识别码正确 |
+同轮64K flags=0基线为146.886s，CHUNK为134.966s，改善8.12%。LOOP1两轮平均无收益；RMSNorm decode改善与噪声重叠；8192 chunk比4096慢且减少KV blocks。短生成仍约7.3–7.6 tok/s。
 
-## 1M YaRN 探针
+## 性能边界
 
-创建轻量 overlay；权重使用硬链接，只有 `config.json` 独立，因此不会重复占用约56GB：
-
-```bash
-python3 scripts/prepare_yarn_model.py \
-  /data/qwen38/models/Qwen3.8-27B \
-  /data/qwen38/models/Qwen3.8-27B-YaRN-1M \
-  --factor 4.0 \
-  --target-context 1000000
-```
-
-本次 TP4 探针成功加载 18 个权重分片和 YaRN 配置，但 profiling 结果为：
-
-```text
-# GPU blocks: 16371
-Maximum concurrency for 1000000 tokens per request: 0.26x
-maximum number of tokens that can be stored in KV cache: 261936
-```
-
-因此 vLLM 在 API ready 之前正确退出。提高 Codex 的 `model_context_window` 不会增加服务器 KV cache；强行绕过检查只会导致 OOM 或错误输出。
-
-要在这类硬件上继续接近 1M，需要后端减少只用于 full-attention 层之外的 KV 分配，或采用经过验证的 pipeline parallel/KV 量化与更多显存。当前社区 dense adapter 没有这套实现，不能把它写进生产配置。
-
+- 400K和1M的主要问题已从KV容量转为full-attention冷prefill计算量。
+- 当前adaptation没有MTP；单靠显存利用率、TP8或更大chunk无法把约7.5 tok/s提升到20–30 tok/s。
+- CUDA Graph在社区同类CoreX+xFormers+TP4路径有OOM/挂死记录；custom all-reduce单并发无稳定收益，默认不启用。
+- PREFIX_FLASH只覆盖有限前缀，且底层BI-V100路径有挂死历史；本项目没有把它放进默认镜像。
+- 真正提高decode需要移植Qwen MTP/speculative worker或厂商提供的新vLLM/CoreX优化；这不是配置开关级改动。

@@ -1,0 +1,43 @@
+{
+  "models": [
+    {
+      "slug": "Qwen3.8-27B",
+      "display_name": "Qwen3.8-27B",
+      "description": "Local Qwen3.8-27B via the isolated Responses bridge.",
+      "default_reasoning_level": "none",
+      "supported_reasoning_levels": [
+        {
+          "effort": "none",
+          "description": "Thinking disabled for the local text runtime"
+        }
+      ],
+      "shell_type": "shell_command",
+      "visibility": "list",
+      "supported_in_api": true,
+      "priority": 1,
+      "upgrade": null,
+      "availability_nux": null,
+      "base_instructions": "You are a coding agent using a local Qwen3.8-27B model. Follow system, developer, and user instructions in that order. Use tools when needed and verify results before claiming success.",
+      "support_verbosity": false,
+      "default_verbosity": null,
+      "apply_patch_tool_type": "freeform",
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "supports_parallel_tool_calls": true,
+      "supports_image_detail_original": true,
+      "context_window": 400000,
+      "max_context_window": 400000,
+      "auto_compact_token_limit": 360000,
+      "effective_context_window_percent": 95,
+      "experimental_supported_tools": [],
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "supports_search_tool": false,
+      "use_responses_lite": false
+    }
+  ]
+}

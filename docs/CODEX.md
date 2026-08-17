@@ -5,6 +5,7 @@
 ```text
 ~/.local/share/codex-qwen38/
 ├── config.toml
+├── model-catalog.json
 └── bridge.env
 ```
 
@@ -105,22 +106,33 @@ codex-qwen38
 codex
 ```
 
-## 100K 上下文预算
+## 400K 上下文预算
 
 Codex 的系统提示、工具 schema 和项目说明在本机首轮约占 8K tokens，因此 8K 服务没有实际交互余量。当前配置为：
 
-- Codex `model_context_window=100000`；
-- 90,000 tokens 触发 Codex 历史压缩；
-- bridge 输入安全线为 94,000 tokens；
-- 单次输出上限 4,096 tokens，安全 margin 256；
+- Codex `model_context_window=400000`；
+- 360,000 tokens 触发 Codex 历史压缩；
+- bridge 输入安全线为 390,000 tokens；
+- 单次输出上限 8192 tokens，安全 margin 256；
 - 单条工具输出最多保留 16,000 字符，单 turn 最多 32 次工具调用；
 - 不再压缩 Codex 内建系统提示；
 - 调用上游 `/tokenize` 计算真实输入大小，并动态缩小输出预算；
 - 超过安全线时先截短旧工具输出，再由 Codex 自动压缩历史。
 
-本次普通回复和工具闭环分别实际使用 8,319 与 16,787 tokens，均通过。`Model metadata ... not found` 表示 Codex 没有内置此自定义模型的产品元数据；skills 描述缩短警告表示所有 skill 仍可见但描述更短。两者不影响已设置的 100K context；真正失败会显示 HTTP 状态或 `ERROR`。
+切到 400K 后，普通回复和工具闭环分别实际使用 11,321 与 22,794 tokens，均通过；工具测试真实执行了 `printf CODEX_400K_TOOL_OK`。skills 描述缩短警告表示所有 skill 仍可见但描述更短，不影响显式设置的 400K context。真正失败会显示 HTTP 状态或 `ERROR`。
 
-模型服务最高已用 95,963 prompt tokens 做双位置口令检索。完整记录见 [长上下文适配与实测](LONG_CONTEXT.md)。
+`Model metadata for Qwen3.8-27B not found` 不是推理服务找不到模型，而是 Codex 0.147 只内置官方 slug 的产品元数据。隔离配置现在通过 `model_catalog_json` 声明本地条目（400K 窗口、`text`+`image`）。安装脚本会把目录里的 `codex/model-catalog.json` 复制到隔离 `CODEX_HOME` 并写入绝对路径。
+
+## 截图与图片
+
+当前 BI-V100 服务是社区 text-only 适配，不会加载官方视觉塔。Codex 粘贴截图后，bridge 会把 `input_image` 转成文本再发给 Qwen：
+
+- 若设置了 `QWEN_VISION_BASE_URL`，调用该 OpenAI 兼容视觉接口做描述；
+- 否则用本机 Tesseract（`chi_sim+eng`）识别可见文字，并附带图片尺寸/格式。
+
+交互里直接粘贴截图即可。官方原生多模态需要 vLLM 0.17+ / Transformers 5.8+ / NVIDIA 或 llama.cpp 视觉投影，和当前 CoreX 3.2.3 文本服务不是同一条路径。
+
+模型服务最高已用 398,971 prompt tokens 做双位置口令检索。该请求耗时约 44 分 35 秒，因此 360K 自动压缩是容量保护，不代表达到 360K 后仍有交互级首 token 延迟。完整记录见 [长上下文适配与实测](LONG_CONTEXT.md)。
 
 ## 明确指定隔离配置
 

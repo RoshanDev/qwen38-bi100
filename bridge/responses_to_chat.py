@@ -21,6 +21,11 @@ from typing import Any
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
+try:
+    from .images import DescribeImage, describer_from_env
+except ImportError:  # python3 bridge/responses_to_chat.py
+    from images import DescribeImage, describer_from_env
+
 
 TOOL_CALL_RE = re.compile(
     r"<tool_call>\s*<function=([^>\n]+)>\s*(.*?)</function>\s*</tool_call>",
@@ -58,7 +63,9 @@ def _json_value(text: str) -> Any:
         return stripped
 
 
-def _content_text(content: Any) -> str:
+def _content_text(
+    content: Any, describe_image: DescribeImage | None = None
+) -> str:
     if isinstance(content, str):
         return content
     if not isinstance(content, list):
@@ -75,7 +82,10 @@ def _content_text(content: Any) -> str:
         if item_type in {"input_text", "output_text", "text"}:
             parts.append(str(item.get("text", "")))
         elif item_type in {"input_image", "image_url"}:
-            parts.append("[image input omitted: this deployment is text-only]")
+            if describe_image is None:
+                parts.append("[image input omitted: this deployment is text-only]")
+            else:
+                parts.append(describe_image(item))
     return "\n".join(part for part in parts if part)
 
 
@@ -91,7 +101,10 @@ def compact_codex_instructions(instructions: str, enabled: bool) -> str:
 
 
 def responses_input_to_chat(
-    body: dict[str, Any], *, compact_codex_prompt: bool = False
+    body: dict[str, Any],
+    *,
+    compact_codex_prompt: bool = False,
+    describe_image: DescribeImage | None = None,
 ) -> list[dict[str, Any]]:
     system_parts: list[str] = []
     instructions = body.get("instructions")
@@ -115,9 +128,18 @@ def responses_input_to_chat(
             continue
         item_type = item.get("type", "message")
 
+        if item_type in {"input_image", "image_url"}:
+            if describe_image is None:
+                text = "[image input omitted: this deployment is text-only]"
+            else:
+                text = describe_image(item)
+            if text:
+                messages.append({"role": "user", "content": text})
+            continue
+
         if item_type == "message":
             role = str(item.get("role", "user"))
-            text = _content_text(item.get("content"))
+            text = _content_text(item.get("content"), describe_image=describe_image)
             if role in {"system", "developer"}:
                 if text:
                     system_parts.append(text)
@@ -150,7 +172,9 @@ def responses_input_to_chat(
                 {
                     "role": "tool",
                     "tool_call_id": str(item.get("call_id", "")),
-                    "content": _content_text(item.get("output")),
+                    "content": _content_text(
+                        item.get("output"), describe_image=describe_image
+                    ),
                 }
             )
 
@@ -272,9 +296,12 @@ def responses_request_to_chat(
     compact_codex_prompt: bool = False,
     allow_tools: bool = True,
     max_output_tokens: int = 4096,
+    describe_image: DescribeImage | None = None,
 ) -> dict[str, Any]:
     messages = responses_input_to_chat(
-        body, compact_codex_prompt=compact_codex_prompt
+        body,
+        compact_codex_prompt=compact_codex_prompt,
+        describe_image=describe_image,
     )
     tools = responses_tools_to_chat(body.get("tools")) if allow_tools else []
     tool_prompt = tools_as_system_prompt(tools)
@@ -520,8 +547,8 @@ class Settings:
             timeout_seconds=int(os.environ.get("QWEN_UPSTREAM_TIMEOUT_SECONDS", "3600")),
             use_system_proxy=os.environ.get("QWEN_UPSTREAM_USE_SYSTEM_PROXY", "0").lower()
             in {"1", "true", "yes", "on"},
-            max_context_tokens=int(os.environ.get("QWEN_MAX_CONTEXT_TOKENS", "100000")),
-            max_input_tokens=int(os.environ.get("QWEN_MAX_INPUT_TOKENS", "94000")),
+            max_context_tokens=int(os.environ.get("QWEN_MAX_CONTEXT_TOKENS", "400000")),
+            max_input_tokens=int(os.environ.get("QWEN_MAX_INPUT_TOKENS", "390000")),
             max_tool_output_chars=int(
                 os.environ.get("QWEN_MAX_TOOL_OUTPUT_CHARS", "16000")
             ),
@@ -529,11 +556,11 @@ class Settings:
                 os.environ.get("QWEN_MAX_TOOL_CALLS_PER_TURN", "32")
             ),
             max_output_tokens=int(
-                os.environ.get("QWEN_MAX_OUTPUT_TOKENS", "4096")
+                os.environ.get("QWEN_MAX_OUTPUT_TOKENS", "8192")
             ),
             token_safety_margin=int(os.environ.get("QWEN_TOKEN_SAFETY_MARGIN", "256")),
             fallback_max_output_tokens=int(
-                os.environ.get("QWEN_FALLBACK_MAX_OUTPUT_TOKENS", "4096")
+                os.environ.get("QWEN_FALLBACK_MAX_OUTPUT_TOKENS", "8192")
             ),
             compact_codex_prompt=os.environ.get(
                 "QWEN_COMPACT_CODEX_INSTRUCTIONS", "0"
@@ -692,6 +719,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
                     prior_tool_calls < self.server.settings.max_tool_calls_per_turn
                 ),
                 max_output_tokens=self.server.settings.max_output_tokens,
+                describe_image=describer_from_env(),
             )
             estimated_input_tokens = fit_upstream_token_budget(
                 self.server.settings, payload

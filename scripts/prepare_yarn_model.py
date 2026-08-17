@@ -12,6 +12,33 @@ import shutil
 import sys
 
 
+def build_layers_block_type(text_config: dict) -> list[str]:
+    """Translate Qwen's hybrid layer layout for vLLM 0.6.3 KV sizing."""
+    layer_types = text_config.get("layer_types")
+    num_layers = int(text_config.get("num_hidden_layers", 0))
+    if not isinstance(layer_types, list) or len(layer_types) != num_layers:
+        raise RuntimeError(
+            "text_config.layer_types length does not match "
+            f"num_hidden_layers: {len(layer_types or [])} != {num_layers}"
+        )
+
+    mapping = {
+        "full_attention": "attention",
+        "linear_attention": "linear_attention",
+    }
+    unknown = sorted(set(layer_types) - set(mapping))
+    if unknown:
+        raise RuntimeError(f"unsupported Qwen layer types: {unknown}")
+    translated = [mapping[layer_type] for layer_type in layer_types]
+    attention_layers = translated.count("attention")
+    if attention_layers == 0 or attention_layers == num_layers:
+        raise RuntimeError(
+            "expected a hybrid attention layout, got "
+            f"{attention_layers}/{num_layers} attention layers"
+        )
+    return translated
+
+
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -64,6 +91,13 @@ def main() -> int:
     )
     text_config["rope_parameters"] = rope_parameters
 
+    # vLLM 0.6.3 reads this compatibility field from the top-level config.
+    # Without it, all 64 Qwen hybrid layers are treated as full-attention KV
+    # layers even though only 16 layers consume a KV cache in qwen3_5.py.
+    layers_block_type = build_layers_block_type(text_config)
+    config["layers_block_type"] = layers_block_type
+    attention_layers = layers_block_type.count("attention")
+
     try:
         shutil.copytree(source, target, copy_function=os.link, symlinks=True)
         target_config_path = target / "config.json"
@@ -81,6 +115,9 @@ def main() -> int:
             "target_context": args.target_context,
             "rope_type": "yarn",
             "factor": args.factor,
+            "vllm_layers_block_type": "top-level compatibility field",
+            "num_hidden_layers": len(layers_block_type),
+            "num_attention_layers": attention_layers,
             "storage": "hard-linked overlay; config.json is independent",
         }
         with (target / "qwen38-yarn-overlay.json").open(
@@ -105,6 +142,8 @@ def main() -> int:
                 "target_config_sha256": sha256(target / "config.json"),
                 "factor": args.factor,
                 "target_context": args.target_context,
+                "num_hidden_layers": len(layers_block_type),
+                "num_attention_layers": attention_layers,
             },
             ensure_ascii=False,
             indent=2,
