@@ -1,6 +1,6 @@
 # 交互延迟 DeepResearch：本机 Qwen3.8 vs ChatGPT / Claude / Grok
 
-日期：2026-08-17  
+日期：2026-08-17
 范围：只做方案，不改线上 8K/400K 服务、不换引擎、不升级宿主驱动。
 
 ## 结论
@@ -120,42 +120,42 @@ Codex 体感拆开看：
 
 ### P0：不换引擎，先降 Codex 体感
 
-1. **Prefix cache**  
-   在独立 400K 容器加 vLLM 0.6.3 `--enable-prefix-caching`。验收：同一 Codex 系统提示连续两轮，第二轮 TTFT 是否明显下降。风险：旧 vLLM + GDN 状态缓存可能不正确，必须用双口令回归。  
+1. **Prefix cache**
+   在独立 400K 容器加 vLLM 0.6.3 `--enable-prefix-caching`。验收：同一 Codex 系统提示连续两轮，第二轮 TTFT 是否明显下降。风险：旧 vLLM + GDN 状态缓存可能不正确，必须用双口令回归。
    预期：第二轮及以后 TTFT 从 20–40s 降到数秒级。对**第一轮冷启动**和 **decode tok/s** 几乎没帮助。
 
-2. **缩短首轮提示**  
-   隔离 `CODEX_HOME` 再关一批 skills/插件，或临时打开已有的 `QWEN_COMPACT_CODEX_INSTRUCTIONS`。验收：`estimated_input_tokens` 从 16k–28k 降到多少，TTFT 是否同比下降。  
+2. **缩短首轮提示**
+   隔离 `CODEX_HOME` 再关一批 skills/插件，或临时打开已有的 `QWEN_COMPACT_CODEX_INSTRUCTIONS`。验收：`estimated_input_tokens` 从 16k–28k 降到多少，TTFT 是否同比下降。
    预期：线性减少 prefill。不提升出字速度。
 
-3. **交互走短窗口，长活再切 400K**  
-   8K 服务已在 GPU0–3。短问答 TTFT 会好一截，但 Codex 完整系统提示本身就接近/超过 8K，所以这条只适合确认“短请求是不是也只有 8 tok/s”。  
+3. **交互走短窗口，长活再切 400K**
+   8K 服务已在 GPU0–3。短问答 TTFT 会好一截，但 Codex 完整系统提示本身就接近/超过 8K，所以这条只适合确认“短请求是不是也只有 8 tok/s”。
    预期：证明 decode 瓶颈与 400K/YaRN 无关。
 
 ### P1：还在现有 vLLM 里挖 decode
 
-4. **只对 decode 试 CUDA Graph**  
-   社区是整路径卡死。若要试，必须独立容器、可秒级杀掉、先短输出。失败就停。  
+4. **只对 decode 试 CUDA Graph**
+   社区是整路径卡死。若要试，必须独立容器、可秒级杀掉、先短输出。失败就停。
    预期：若能稳住，单并发 decode 有机会到 12–20 tok/s。失败模式是挂死。
 
-5. **PREFIX_FLASH / GDN prefix state**  
-   社区有提交，本仓库因挂死风险未默认打开。只对 Codex 重复前缀做隔离 A/B。  
+5. **PREFIX_FLASH / GDN prefix state**
+   社区有提交，本仓库因挂死风险未默认打开。只对 Codex 重复前缀做隔离 A/B。
    预期：改善 prefill，不解决 7.6 tok/s。
 
-6. **量化**  
-   先静态查 CoreX 3.2.3 镜像有没有 FP8/INT8 GEMM 和对应 vLLM 权重量化。没有核就不要转权重量。  
+6. **量化**
+   先静态查 CoreX 3.2.3 镜像有没有 FP8/INT8 GEMM 和对应 vLLM 权重量化。没有核就不要转权重量。
    预期：若核可用，decode 可能接近 A100 公开量级的一半到同级；这是猜测，必须测。
 
 ### P2：架构级，不承诺工期
 
-7. **MTP / speculative decode**  
-   官方权重有 MTP，当前 loader 是 CausalLM、无视觉/无 MTP。要移植模型类和 draft 路径。  
+7. **MTP / speculative decode**
+   官方权重有 MTP，当前 loader 是 CausalLM、无视觉/无 MTP。要移植模型类和 draft 路径。
    预期：这是文献上把逐步 decode 拉到 20–30+ tok/s 的正路。工作量最大。
 
-8. **SGLang**  
+8. **SGLang**
    仅在天数或社区给出 BI-V100 可运行配方后立项。现在做是重写运行时。
 
-9. **换 NVIDIA 机器跑官方 vLLM/SGLang + FP8**  
+9. **换 NVIDIA 机器跑官方 vLLM/SGLang + FP8**
    若目标是“接近 ChatGPT 体感”，这是唯一能在数天内对齐 60–100 tok/s 的办法。不在当前 BI-V100 节点的风险边界内。
 
 ## 建议的验收口径
