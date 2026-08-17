@@ -76,6 +76,7 @@ gzip -dc qwen38-dense-native-v1.tar.gz | docker load
 ~/Developer/Qwen3.8-27B/
 ~/.local/share/codex-qwen38/config.toml
 ~/.local/share/codex-qwen38/bridge.env
+~/.local/share/codex-qwen38/model-catalog.json
 ~/.config/systemd/user/qwen38-codex-bridge.service
 ~/.local/bin/codex-qwen38
 ```
