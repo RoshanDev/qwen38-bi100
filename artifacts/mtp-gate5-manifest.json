@@ -1,0 +1,115 @@
+{
+  "gate": "5-kv-replay",
+  "decision": "stop_mtp",
+  "stop_line": "<30%",
+  "conclusion": "在当前 CoreX 3.2.3 / vLLM 0.6.3 适配器上，使用真实 target positions、正确 post-final-norm hidden、Gemma RMSNorm (1+w) 和持续维护的一层 MTP KV 进行离线回放，159 步 top-1 命中率为 15.7%。虽然未对 27-token prompt 建立 MTP prefill KV，但后半段缓存超过 100 tokens 后命中率仍仅约 9%，不足以支持继续实现 GPU MTP 和 fused target verification。因此按预设 <30% 止损线停止该路线。",
+  "not_a_claim": "Qwen3.8 自带 MTP 的真实接受率只有 15.7%",
+  "model": {
+    "name": "Qwen3.8-27B",
+    "revision": "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0",
+    "path": "/data/qwen38/models/Qwen3.8-27B",
+    "config_sha256": "9aa46c7669314c313f9c9129200b369f0cddbc4d38a1fa0a12b7eb3d73994032",
+    "official_config_sha256": "191e0af232104ed8b65258cf3fb2b842e288008baca7633c11b82a1ac7203aab",
+    "index_sha256": "77042094076611b69791a610065f28b7013b8c621795fa86ddccc8bac7d1b9df"
+  },
+  "images": {
+    "8k_rollback": {
+      "tag": "qwen38-bi100:corex3.2.3-text-0e899",
+      "id": "sha256:e1fa06314db39ed01be80949428a747d519fdade0d25239ca2d34390eb009cfe"
+    },
+    "400k_prod": {
+      "tag": "qwen38-bi100:corex3.2.3-dense-native-v1",
+      "id": "sha256:5ec386a3d4cb862eae915f2597d3ef945b0fd2d0eb7371edb3ea8be38214ce20"
+    },
+    "mtp_exp_unused_for_gate5": {
+      "tag": "qwen38-bi100:corex3.2.3-mtp-k1-exp",
+      "id": "sha256:e6e97072819863d3adda60bf3fb4d90cdd959be383b0097fcac7dd216e071165"
+    }
+  },
+  "adapter": {
+    "branch": "exp/mtp-k1-vllm",
+    "experiment_commit": "ae3b3fbeebbbae636ec94f89ede35f62c679114b",
+    "merged_to_main": false,
+    "runtime": "CoreX 3.2.3 / vLLM 0.6.3 / Qwen3_5 text adapter"
+  },
+  "prompt": {
+    "text": "用两段中文解释矩阵乘法为什么是 Transformer 的主要计算，不要提纲。",
+    "sha256": "af7d61e8305b2e4a89dc9ac05456af26b4390f409d7fc9f0bf1f11512c00350c",
+    "tokenizer_len": 28,
+    "temperature": 0.0,
+    "enable_thinking": false,
+    "max_tokens": 160,
+    "finish_reason": "length"
+  },
+  "dump": {
+    "n_generated": 160,
+    "n_steps": 159,
+    "position_range": [27, 185],
+    "positions_monotonic_plus_one": true,
+    "lm_head_identity": "159/159",
+    "json_sha256": "9f2cff3d66dced05b06ab5a2aa156da793a14e4c502afc714b84645c1b370024",
+    "pt_sha256": "3e9a81e2f7fc97b7f08753e19eac2fabcc56f90c57300a8ba579c990356827dd"
+  },
+  "official_cache": {
+    "use_cache": true,
+    "position_offset": 0,
+    "top1_hits": 25,
+    "top1_rate": 0.15723270440251572,
+    "top5_hits": 71,
+    "top5_rate": 0.44654088050314467,
+    "mean_rank": 87.0,
+    "median_rank": 9.0,
+    "early32_top1": 0.125,
+    "mid32_top1": 0.15625,
+    "last32_top1": 0.09375,
+    "cache_final_len": 159
+  },
+  "control_no_cache": {
+    "use_cache": false,
+    "position_offset": 0,
+    "top1_hits": 26,
+    "top1_rate": 0.16352201257861634,
+    "top5_hits": 64,
+    "top5_rate": 0.4025157232704403,
+    "mean_rank": 106.25786163522012,
+    "median_rank": 9.0,
+    "same_draft_as_official": 72
+  },
+  "position_offset_diagnostics": [
+    {"offset": -2, "n": 32, "top1_rate": 0.125, "top5_rate": 0.40625, "mean_rank": 155.6875},
+    {"offset": -1, "n": 32, "top1_rate": 0.15625, "top5_rate": 0.40625, "mean_rank": 160.59375},
+    {"offset": 1, "n": 32, "top1_rate": 0.125, "top5_rate": 0.40625, "mean_rank": 143.1875},
+    {"offset": 2, "n": 32, "top1_rate": 0.125, "top5_rate": 0.40625, "mean_rank": 157.84375}
+  ],
+  "hidden_after_final_norm": {
+    "is_residual_risk": false,
+    "reason": "Official MTP receives the target last hidden after final RMSNorm, then applies its own pre_fc_norm_hidden."
+  },
+  "missing_prompt_mtp_prefill": {
+    "is_complete_reproduction": false,
+    "overturns_stop_loss": false,
+    "prompt_tokens": 27,
+    "reason": "Later-window cache already exceeded 100 tokens and last-32 top-1 was about 9%."
+  },
+  "logs": {
+    "dir": "/data/qwen38/logs/mtp-gate5-kv/",
+    "replay_json_sha256": "e3bbcc2cd3fc7fdf8dce9ed53b2fc0d7198e74ab4c667362d73b313c411b15dd",
+    "committed_to_git": false
+  },
+  "restore": {
+    "8k": {"port": 1111, "health": 200, "chat": "OK", "image_replaced": false},
+    "400k": {"port": 1112, "health": 200, "touched": false, "mtp_attached": false}
+  },
+  "abandoned": {
+    "fused_verify": true,
+    "k2": true,
+    "codex_mtp": true,
+    "smaller_qwen38_instance": true,
+    "smaller_qwen38_reason": "质量不如当前 BF16 TP4 27B，不再作为加速替代"
+  },
+  "reproduce": [
+    "bash /data/qwen38/scripts/run_mtp_gate5_kv.sh",
+    "python3 scripts/mtp_gate5_replay.py --model /data/qwen38/models/Qwen3.8-27B --dump /data/qwen38/logs/mtp-gate5-kv/mtp-gate5-dump.pt --out /data/qwen38/logs/mtp-gate5-kv/mtp-gate5-replay.json",
+    "python3 -m unittest tests.test_mtp_gate5_stats -v"
+  ]
+}

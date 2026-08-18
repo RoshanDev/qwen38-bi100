@@ -105,8 +105,12 @@ class MTPHead:
         lm_head = tensors.pop(LM_HEAD_KEY)
         return cls(tensors, embed, lm_head, text, census)
 
-    def propose(self, token_id: int, hidden, position: int):
-        """hidden: [1,1,H] last-layer after final norm, the row that produced the last token."""
+    def propose(self, token_id: int, hidden, position: int, cache=None):
+        """hidden: [1,1,H] last-layer after final norm, the row that produced the last token.
+
+        cache=None keeps the old 1x1 observer attention. Pass MTPKVCache to
+        append RoPE'd K/V and attend over the full MTP history.
+        """
         import torch
 
         mtp = self.tensors
@@ -159,12 +163,14 @@ class MTPHead:
         q = q.permute(0, 2, 1, 3)
         k = k.permute(0, 2, 1, 3)
         v = v.permute(0, 2, 1, 3)
+        if cache is not None:
+            k, v = cache.append(k, v)
         repeat = num_heads // num_kv_heads
         k = k.repeat_interleave(repeat, dim=1)
         v = v.repeat_interleave(repeat, dim=1)
-        attn = torch.matmul(q.float(), k.float().transpose(-2, -1)) * (head_dim ** -0.5)
-        attn = torch.softmax(attn, dim=-1)
-        ctx = torch.matmul(attn, v.float()).permute(0, 2, 1, 3)
+        from .kv import attend_decode
+
+        ctx = attend_decode(q, k, v, head_dim).permute(0, 2, 1, 3)
         ctx = (ctx * torch.sigmoid(gate.float())).to(dtype=hidden.dtype)
         attn_out = linear(
             ctx.reshape(batch, seq, num_heads * head_dim),
